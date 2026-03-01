@@ -1,20 +1,41 @@
 # lite-llm-inference
 
-Independent Rust crate skeleton for Lite LLM: Inference Runtime (Spec 041-050).
+Inference runtime crate for Lite LLM (`SPEC-041` to `SPEC-050`).
 
-## Purpose
-This crate provides compile-ready interfaces and placeholder implementations for its spec layer.
+## Scope
+Implements deterministic inference primitives:
 
-## Structure
-- src/lib.rs: module exports and public API surface
-- src/*.rs: layer-specific primitives and traits
+- TierSet selection engine and budget solver
+- token routing execution and expert packing/dispatch
+- prefetch planning and KV-cache behavior
+- streaming session runtime with replayable prefixes
+- cost-adaptive routing and telemetry
+- multi-tenant isolation controls
 
-## Build
-`ash
-cargo check
-`
+## Modules
+- `src/tierset_selection.rs`
+- `src/pipeline.rs`
+- `src/prefetch.rs`
+- `src/kv_cache.rs`
+- `src/streaming.rs`
+- `src/cost_adaptive.rs`
+- `src/telemetry.rs`
+- `src/tenant.rs`
+- `src/types.rs`
+- `src/error.rs`
 
-## Notes
-- This crate is intentionally standalone.
-- Runtime behavior is scaffolded, not production-complete.
-- License for this crate is in LICENSE.
+## Build and Test
+```bash
+cargo fmt
+cargo test
+```
+
+## Documentation
+- System docs: `../lite-llm-docs/README.md`
+- API docs: `../lite-llm-docs/api/mode-entrypoints.md`
+
+## Changelog
+See `CHANGELOG.md`.
+
+## License
+See `LICENSE`.
