@@ -1,0 +1,10 @@
+[package]
+name = "lite-llm-inference"
+version = "0.1.0"
+edition = "2021"
+description = "Lite LLM inference runtime skeleton for TierSet selection and routing pipelines."
+license-file = "LICENSE"
+readme = "README.md"
+rust-version = "1.70"
+
+[dependencies]
