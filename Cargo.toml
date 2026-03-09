@@ -10,3 +10,5 @@ authors = ["Lite LLM Developers <litellm@dust.llc>"]
 rust-version = "1.70"
 
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+rand = "0.8"
