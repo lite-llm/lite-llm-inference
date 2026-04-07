@@ -204,10 +204,7 @@ impl TierSetSelector {
             }
         }
 
-        selected = selected
-            .into_iter()
-            .filter(|tier| available.contains(tier))
-            .collect();
+        selected.retain(|tier| available.contains(tier));
 
         if selected.is_empty() {
             if let Some(fallback) = self.lowest_latency_tier(&available) {

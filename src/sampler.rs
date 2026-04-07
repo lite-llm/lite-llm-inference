@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+#[allow(unused_imports)]
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use crate::error::InferenceResult;
@@ -136,7 +137,7 @@ impl Sampler {
             return 0;
         }
 
-        let mut probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum).collect();
+        let probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum).collect();
 
         let r = rand::random::<f32>();
         let mut cumulative = 0.0;

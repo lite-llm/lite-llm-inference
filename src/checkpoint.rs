@@ -40,7 +40,7 @@ impl ModelCheckpoint {
     pub fn load(path: &Path) -> std::io::Result<Self> {
         let mut file = File::open(path)?;
 
-        let mut magic = [0u8; 15];
+        let mut magic = [0u8; 17];
         file.read_exact(&mut magic)?;
         let expected: &[u8] = b"LITE_LLM_MODEL_V1";
         if &magic != expected {
@@ -186,8 +186,9 @@ mod tests {
 
         save_checkpoint(&temp_dir, 90, 64, 2, 2).unwrap();
 
-        let (vocab, hidden, layers, heads) = load_checkpoint(&temp_dir).unwrap();
+        let (vocab, hidden, _layers, _heads) = load_checkpoint(&temp_dir).unwrap();
         assert_eq!(vocab, 90);
+        assert_eq!(hidden, 64);
         assert_eq!(hidden, 64);
 
         std::fs::remove_dir_all(temp_dir).ok();

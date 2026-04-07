@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+#[allow(unused_imports)]
 use crate::tokenizer::Tokenizer;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Embedding {
     vocab_size: usize,
     embedding_dim: usize,
@@ -94,11 +96,10 @@ impl Linear {
 }
 
 pub fn gelu(x: f32) -> f32 {
-    if x > 0.0 {
-        x * (1.0 + (-(x * x * 0.5_f32).exp()))
-    } else {
-        x * (1.0 + (-(x * x * 0.5_f32).exp()))
-    }
+    let sqrt_2_over_pi = 0.7978845608028654;
+    let c = 0.044714998453855515;
+    let t = (sqrt_2_over_pi * (x + c * x * x * x)).tanh();
+    x * 0.5 * (1.0 + t)
 }
 
 pub fn softmax(input: &[f32], temperature: f32) -> Vec<f32> {
@@ -130,6 +131,7 @@ pub fn softmax(input: &[f32], temperature: f32) -> Vec<f32> {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FeedForward {
     gate_proj: Linear,
     up_proj: Linear,
@@ -262,6 +264,7 @@ impl Attention {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TransformerBlock {
     attention: Attention,
     feed_forward: FeedForward,
@@ -322,6 +325,7 @@ impl LMHead {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Model {
     embedding: Arc<Embedding>,
     layers: Vec<TransformerBlock>,
