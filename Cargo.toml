@@ -2,7 +2,7 @@
 name = "lite-llm-inference"
 version = "0.1.0"
 edition = "2021"
-description = "Lite LLM inference runtime skeleton for TierSet selection and routing pipelines."
+description = "Lite LLM inference runtime: TierSet selection, routing, and GPU-accelerated execution."
 license-file = "LICENSE"
 readme = "README.md"
 repository = "https://github.com/lite-llm/lite-llm-inference"
@@ -12,3 +12,17 @@ rust-version = "1.70"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 rand = "0.8"
+log = "0.4"
+# GPU compute via CUDA (cudarc provides safe Rust bindings to CUDA)
+# Note: When enabling the `cuda` feature, also specify a CUDA version feature:
+#   cuda = ["dep:cudarc", "cudarc/cuda-12060"]
+# Available: cuda-12060, cuda-12050, cuda-12040, cuda-12030, cuda-12020, cuda-12010, cuda-12000, cuda-11080, cuda-11070, cuda-11060, cuda-11050, cuda-11040
+# Or use cuda-version-from-build-system to detect from system.
+cudarc = { version = "0.12", features = ["std", "f16", "cublas", "cuda-version-from-build-system"], optional = true }
+# Async runtime for GPU kernel launches and concurrent inference
+tokio = { version = "1", features = ["rt", "sync"] }
+
+[features]
+default = []
+# CUDA GPU backend (requires NVIDIA GPU + CUDA toolkit)
+cuda = ["dep:cudarc"]

@@ -2,8 +2,10 @@ pub mod checkpoint;
 pub mod cost_adaptive;
 pub mod engine;
 pub mod error;
+pub mod gpu_backend;
 pub mod kv_cache;
 pub mod model;
+pub mod modern_layers;
 pub mod pipeline;
 pub mod prefetch;
 pub mod sampler;
@@ -24,9 +26,13 @@ pub use engine::{
     InferenceResponse, InferenceSession,
 };
 pub use error::{InferenceError, InferenceResult};
+pub use gpu_backend::{cuda_info, CudaDeviceInfo, CudaInfo, CudaDeviceManager, Device, Tensor};
 pub use kv_cache::{KvCache, KvCacheConfig, KvEntry, KvTier};
 pub use model::{
     create_model, Attention, FeedForward, LMHead, Linear, Model, ModelWeights, TransformerBlock,
+};
+pub use modern_layers::{
+    swiglu, GroupedQueryConfig, ModernFeedForward, RmsNorm, RotaryEmbedding,
 };
 pub use pipeline::{
     DeterministicInferencePipeline, ExpertScore, InferencePipeline, PackedSegment, PackedToken,
