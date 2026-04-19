@@ -19,8 +19,10 @@ use crate::gpu_backend::Tensor;
 /// Reference: Su et al. "RoFormer: Enhanced Transformer with Rotary Position Embedding" (2021)
 #[derive(Debug, Clone)]
 pub struct RotaryEmbedding {
+    #[allow(dead_code)]
     dim: usize,
     max_seq_len: usize,
+    #[allow(dead_code)]
     base: f32,
     cos_cache: Tensor,
     sin_cache: Tensor,
@@ -121,7 +123,7 @@ impl RmsNorm {
         }
     }
 
-    /// Normalize a tensor of shape [batch, dim] or [dim].
+    /// Normalize a tensor of shape `[batch, dim]` or `[dim]`.
     pub fn forward(&self, x: &Tensor) -> Tensor {
         let dim = x.shape.last().copied().unwrap_or(x.data.len());
         let batch = x.data.len() / dim;
@@ -246,6 +248,7 @@ pub struct ModernFeedForward {
     up_proj: Tensor,   // W_up: [hidden_dim, intermediate_dim]
     down_proj: Tensor, // W_down: [intermediate_dim, hidden_dim]
     hidden_dim: usize,
+    #[allow(dead_code)]
     intermediate_dim: usize,
     rms_norm: RmsNorm,
 }

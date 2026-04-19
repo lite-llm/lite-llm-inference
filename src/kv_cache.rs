@@ -20,6 +20,310 @@ pub struct KvEntry {
     pub tier: KvTier,
 }
 
+impl KvEntry {
+    /// Transfer this KV entry to GPU device memory (when `cuda` feature is enabled).
+    ///
+    /// Returns a `GpuKvEntry` containing the same data but with device-side
+    /// allocations for key and value vectors.
+    #[cfg(feature = "cuda")]
+    pub fn to_gpu(&self, device_id: usize) -> InferenceResult<GpuKvEntry> {
+        use crate::gpu_backend::GpuDeviceManager;
+
+        let manager = GpuDeviceManager::global();
+        if manager.device_count() == 0 {
+            return Err(InferenceError::InvalidState(
+                "no CUDA devices available for GPU KV cache",
+            ));
+        }
+
+        let device_id = if device_id >= manager.device_count() {
+            0
+        } else {
+            device_id
+        };
+
+        let key_gpu = manager.alloc_device(device_id, &self.key).map_err(|e| {
+            InferenceError::IoError(format!("GPU key allocation failed: {}", e))
+        })?;
+        let value_gpu = manager
+            .alloc_device(device_id, &self.value)
+            .map_err(|e| {
+                InferenceError::IoError(format!("GPU value allocation failed: {}", e))
+            })?;
+
+        Ok(GpuKvEntry {
+            layer: self.layer,
+            head: self.head,
+            position: self.position,
+            key_gpu,
+            value_gpu,
+            device_id,
+            tier: self.tier,
+            // Keep host-side cache for quick access
+            key_host: self.key.clone(),
+            value_host: self.value.clone(),
+        })
+    }
+
+    /// No-op when CUDA is not enabled — returns self wrapped in Result.
+    #[cfg(not(feature = "cuda"))]
+    pub fn to_gpu(&self, _device_id: usize) -> InferenceResult<StubGpuKvEntry> {
+        Err(InferenceError::InvalidState(
+            "cuda feature not enabled; GPU KV cache unavailable",
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GPU KV Cache Types
+// ---------------------------------------------------------------------------
+
+/// A GPU-resident KV cache entry with device memory allocations.
+///
+/// When the `cuda` feature is enabled, this type wraps `cudarc::driver::safe::CudaSlice`
+/// handles for the key and value vectors, enabling GPU-resident KV state that avoids
+/// repeated host-to-device transfers during inference.
+#[cfg(feature = "cuda")]
+#[derive(Debug)]
+pub struct GpuKvEntry {
+    pub layer: u16,
+    pub head: u16,
+    pub position: u64,
+    /// GPU device memory handle for the key vector.
+    pub key_gpu: cudarc::driver::safe::CudaSlice<f32>,
+    /// GPU device memory handle for the value vector.
+    pub value_gpu: cudarc::driver::safe::CudaSlice<f32>,
+    /// The GPU device ID where this entry is allocated.
+    pub device_id: usize,
+    pub tier: KvTier,
+    /// Host-side cache for fallback and debugging.
+    pub key_host: Vec<f32>,
+    pub value_host: Vec<f32>,
+}
+
+#[cfg(feature = "cuda")]
+impl GpuKvEntry {
+    /// Transfer the GPU-resident entry back to CPU memory.
+    ///
+    /// This copies data from device memory back to host and returns a standard `KvEntry`.
+    pub fn to_cpu(&self) -> InferenceResult<KvEntry> {
+        use crate::gpu_backend::GpuDeviceManager;
+
+        let manager = GpuDeviceManager::global();
+        let key = manager.copy_device_to_host(&self.key_gpu).map_err(|e| {
+            InferenceError::IoError(format!("GPU->CPU key transfer failed: {}", e))
+        })?;
+        let value = manager
+            .copy_device_to_host(&self.value_gpu)
+            .map_err(|e| {
+                InferenceError::IoError(format!("GPU->CPU value transfer failed: {}", e))
+            })?;
+
+        Ok(KvEntry {
+            layer: self.layer,
+            head: self.head,
+            position: self.position,
+            key,
+            value,
+            tier: self.tier,
+        })
+    }
+}
+
+/// Stub type returned when `cuda` feature is disabled.
+#[cfg(not(feature = "cuda"))]
+#[derive(Debug)]
+pub struct StubGpuKvEntry;
+
+// ---------------------------------------------------------------------------
+// GpuKvCache
+// ---------------------------------------------------------------------------
+
+/// GPU-resident KV cache manager that keeps hot entries in device memory.
+///
+/// When the `cuda` feature is enabled, this cache automatically promotes
+/// recently-accessed (hot) entries to GPU memory for faster inference.
+/// Warm and cold entries remain in host memory.
+#[cfg(feature = "cuda")]
+#[derive(Debug)]
+pub struct GpuKvCache {
+    /// GPU device ID for allocations.
+    device_id: usize,
+    /// Maximum number of entries to keep in GPU memory.
+    max_gpu_entries: usize,
+    /// Hot entries resident on GPU (keyed by position).
+    gpu_entries: BTreeMap<u64, GpuKvEntry>,
+    /// Fallback: all entries in host memory.
+    host_entries: BTreeMap<u64, KvEntry>,
+}
+
+#[cfg(feature = "cuda")]
+impl GpuKvCache {
+    /// Create a new GPU KV cache for the given device.
+    ///
+    /// # Arguments
+    ///
+    /// * `device_id` - The CUDA device ID to use for GPU allocations.
+    /// * `max_gpu_entries` - Maximum number of entries to keep in GPU memory.
+    ///   When exceeded, the oldest (lowest position) entries are evicted to host.
+    pub fn new(device_id: usize, max_gpu_entries: usize) -> InferenceResult<Self> {
+        use crate::gpu_backend::GpuDeviceManager;
+
+        let manager = GpuDeviceManager::global();
+        if manager.device_count() == 0 {
+            return Err(InferenceError::InvalidState(
+                "no CUDA devices available for GPU KV cache",
+            ));
+        }
+
+        let device_id = if device_id >= manager.device_count() {
+            0
+        } else {
+            device_id
+        };
+
+        if max_gpu_entries == 0 {
+            return Err(InferenceError::InvalidConfig(
+                "max_gpu_entries must be greater than zero",
+            ));
+        }
+
+        Ok(Self {
+            device_id,
+            max_gpu_entries,
+            gpu_entries: BTreeMap::new(),
+            host_entries: BTreeMap::new(),
+        })
+    }
+
+    /// Append a new KV entry to the cache, promoting it to GPU if hot.
+    pub fn append(
+        &mut self,
+        layer: u16,
+        head: u16,
+        position: u64,
+        key: &[f32],
+        value: &[f32],
+    ) -> InferenceResult<()> {
+        if key.len() != value.len() {
+            return Err(InferenceError::InvalidInput(
+                "kv key/value lengths must be equal",
+            ));
+        }
+
+        let entry = KvEntry {
+            layer,
+            head,
+            position,
+            key: key.to_vec(),
+            value: value.to_vec(),
+            tier: KvTier::Hot,
+        };
+
+        // Try to promote to GPU
+        if self.gpu_entries.len() < self.max_gpu_entries {
+            match entry.to_gpu(self.device_id) {
+                Ok(gpu_entry) => {
+                    self.gpu_entries.insert(position, gpu_entry);
+                    return Ok(());
+                }
+                Err(_) => {
+                    // Fall back to host storage
+                }
+            }
+        }
+
+        // Evict oldest GPU entry if at capacity
+        if self.gpu_entries.len() >= self.max_gpu_entries {
+            if let Some((&oldest_pos, oldest_gpu_entry)) = self.gpu_entries.first_key_value() {
+                let host_entry = oldest_gpu_entry.to_cpu()?;
+                self.gpu_entries.remove(&oldest_pos);
+                self.host_entries.insert(oldest_pos, host_entry);
+            }
+        }
+
+        // Try GPU promotion again after eviction
+        if self.gpu_entries.len() < self.max_gpu_entries {
+            if let Ok(gpu_entry) = entry.to_gpu(self.device_id) {
+                self.gpu_entries.insert(position, gpu_entry);
+                return Ok(());
+            }
+        }
+
+        // Final fallback: store in host memory
+        self.host_entries.insert(position, entry);
+        Ok(())
+    }
+
+    /// Retrieve entries by position range, fetching from GPU or host.
+    pub fn slice(
+        &self,
+        layer: u16,
+        head: u16,
+        from_position: u64,
+        to_position_exclusive: u64,
+    ) -> InferenceResult<Vec<KvEntry>> {
+        if from_position > to_position_exclusive {
+            return Err(InferenceError::InvalidInput(
+                "from_position must be <= to_position_exclusive",
+            ));
+        }
+
+        let mut results = Vec::new();
+
+        // Check GPU entries first
+        for (&pos, gpu_entry) in self.gpu_entries.range(from_position..to_position_exclusive) {
+            if gpu_entry.layer == layer && gpu_entry.head == head {
+                results.push(gpu_entry.to_cpu()?);
+            }
+        }
+
+        // Check host entries
+        for (&pos, entry) in self.host_entries.range(from_position..to_position_exclusive) {
+            if entry.layer == layer && entry.head == head {
+                results.push(entry.clone());
+            }
+        }
+
+        results.sort_by(|a, b| a.position.cmp(&b.position));
+        Ok(results)
+    }
+
+    /// Get the number of entries currently in GPU memory.
+    pub fn gpu_entry_count(&self) -> usize {
+        self.gpu_entries.len()
+    }
+
+    /// Get the total number of entries (GPU + host).
+    pub fn total_entry_count(&self) -> usize {
+        self.gpu_entries.len() + self.host_entries.len()
+    }
+
+    /// Remove an entry by position, freeing GPU memory if applicable.
+    pub fn remove(&mut self, position: u64) {
+        self.gpu_entries.remove(&position);
+        self.host_entries.remove(&position);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CPU-only stub for GpuKvCache
+// ---------------------------------------------------------------------------
+
+/// Stub type when `cuda` feature is disabled.
+#[cfg(not(feature = "cuda"))]
+#[derive(Debug)]
+pub struct GpuKvCache;
+
+#[cfg(not(feature = "cuda"))]
+impl GpuKvCache {
+    pub fn new(_device_id: usize, _max_gpu_entries: usize) -> InferenceResult<Self> {
+        Err(InferenceError::InvalidState(
+            "cuda feature not enabled; GPU KV cache unavailable",
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KvCacheConfig {
     pub hot_token_limit: usize,
@@ -235,7 +539,7 @@ impl KvCache {
 
 #[cfg(test)]
 mod tests {
-    use super::{KvCache, KvCacheConfig, KvTier};
+    use super::{GpuKvCache, KvCache, KvCacheConfig, KvEntry, KvTier};
 
     fn cache() -> KvCache {
         KvCache::new(KvCacheConfig {
@@ -326,5 +630,31 @@ mod tests {
         cache.reset_session(1, 10);
         assert_eq!(cache.session_len(1, 10), 0);
         assert_eq!(cache.session_len(2, 10), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // GPU KV Cache Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    #[cfg(not(feature = "cuda"))]
+    fn gpu_kv_cache_returns_error_when_cuda_disabled() {
+        let result = GpuKvCache::new(0, 10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(not(feature = "cuda"))]
+    fn kv_entry_to_gpu_returns_error_when_cuda_disabled() {
+        let entry = KvEntry {
+            layer: 0,
+            head: 0,
+            position: 0,
+            key: vec![1.0, 2.0],
+            value: vec![3.0, 4.0],
+            tier: KvTier::Hot,
+        };
+        let result = entry.to_gpu(0);
+        assert!(result.is_err());
     }
 }

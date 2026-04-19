@@ -8,6 +8,7 @@ pub mod model;
 pub mod modern_layers;
 pub mod pipeline;
 pub mod prefetch;
+pub mod prometheus_exporter;
 pub mod sampler;
 pub mod streaming;
 pub mod telemetry;
@@ -27,7 +28,11 @@ pub use engine::{
 };
 pub use error::{InferenceError, InferenceResult};
 pub use gpu_backend::{cuda_info, CudaDeviceInfo, CudaInfo, CudaDeviceManager, Device, Tensor};
-pub use kv_cache::{KvCache, KvCacheConfig, KvEntry, KvTier};
+pub use kv_cache::{GpuKvCache, KvCache, KvCacheConfig, KvEntry, KvTier};
+#[cfg(feature = "cuda")]
+pub use kv_cache::GpuKvEntry;
+#[cfg(not(feature = "cuda"))]
+pub use kv_cache::StubGpuKvEntry as GpuKvEntry;
 pub use model::{
     create_model, Attention, FeedForward, LMHead, Linear, Model, ModelWeights, TransformerBlock,
 };
@@ -41,6 +46,10 @@ pub use pipeline::{
 pub use prefetch::{
     build_prefetch_plan, PrefetchAction, PrefetchCandidate, PrefetchPlan, PrefetchPolicy,
     PrefetchRequest,
+};
+pub use prometheus_exporter::{
+    render_metrics, Counter, Gauge, Histogram, MetricsRegistry,
+    map_telemetry_to_prometheus,
 };
 pub use sampler::{GenerateOptions, Generator, Sampler, SamplingMethod};
 pub use streaming::{StreamStatus, StreamingRequest, StreamingRuntime, StreamingSession};

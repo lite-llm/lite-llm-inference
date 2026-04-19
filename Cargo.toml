@@ -26,3 +26,11 @@ tokio = { version = "1", features = ["rt", "sync"] }
 default = []
 # CUDA GPU backend (requires NVIDIA GPU + CUDA toolkit)
 cuda = ["dep:cudarc"]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+lite-llm-runtime = { version = "0.1.0", path = "../lite-llm-runtime" }
+
+[[bench]]
+name = "inference_bench"
+harness = false
