@@ -43,7 +43,11 @@ impl fmt::Display for InferenceError {
     }
 }
 
-impl Error for InferenceError {}
+impl Error for InferenceError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
+}
 
 impl From<std::io::Error> for InferenceError {
     fn from(value: std::io::Error) -> Self {
